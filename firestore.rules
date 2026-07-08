@@ -1,0 +1,63 @@
+rules_version = '2';
+
+// Volume 13 — Security. Yeh rules Firebase Console → Firestore Database → Rules
+// me paste karni hain (ya `firebase deploy --only firestore:rules` se, agar
+// Firebase CLI use kar rahe hain).
+//
+// Covers: projects (own + shared), versions, comments, users (admin panel).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(resource) {
+      return isSignedIn() && request.auth.uid == resource.data.ownerId;
+    }
+
+    function isCollaborator(resource) {
+      return isSignedIn() &&
+        resource.data.sharedWith is list &&
+        request.auth.token.email in resource.data.sharedWith;
+    }
+
+    // ---------- projects ----------
+    match /projects/{projectId} {
+      allow read: if isOwner(resource) || isCollaborator(resource);
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isOwner(resource) || isCollaborator(resource);
+      allow delete: if isOwner(resource);
+
+      // ---------- projects/{id}/versions ----------
+      match /versions/{versionId} {
+        allow read, create: if isSignedIn() &&
+          (get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid ||
+           request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.sharedWith);
+        allow update, delete: if false; // versions immutable — history hamesha safe rahe
+      }
+
+      // ---------- projects/{id}/comments ----------
+      match /comments/{commentId} {
+        allow read, create: if isSignedIn() &&
+          (get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid ||
+           request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.sharedWith);
+        // Har koi apna hi comment edit/delete kar sakta hai
+        allow update, delete: if isSignedIn() && resource.data.authorEmail == request.auth.token.email;
+      }
+    }
+
+    // ---------- users (Admin Panel "Users" tab ke liye profile tracking) ----------
+    match /users/{userId} {
+      allow read: if isSignedIn(); // Admin Panel ke liye — real production me isko admin-only banayein
+      allow write: if isSignedIn() && request.auth.uid == userId; // sirf khud ka profile likh sakta hai
+    }
+
+    // ---------- auditLogs (Step 14 — Audit Logs) ----------
+    match /auditLogs/{logId} {
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow read: if false; // sirf Cloud Functions/Admin SDK se padha jaana chahiye, client se nahi
+      allow update, delete: if false; // logs immutable
+    }
+  }
+}

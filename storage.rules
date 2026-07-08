@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Volume 13 — Security. Firebase Console → Storage → Rules me paste karein.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /assets/{allPaths=**} {
+      // Koi bhi signed-in user upload/read kar sakta hai (Asset Library sabke
+      // liye shared hai abhi). Agar per-user private assets chahiye, path me
+      // uid include karein (e.g. assets/{uid}/photos/...) aur rule update karein.
+      allow read: if true; // assets public URLs se load hote hain (canvas me dikhane ke liye)
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024 // max 10MB per file
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
